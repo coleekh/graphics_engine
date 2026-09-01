@@ -2,16 +2,18 @@ mod renderer;
 mod scene;
 mod utils;
 mod input;
+mod time;
+
+use std::sync::Arc;
 
 use winit::{
-    event::{ElementState, Event, KeyEvent, WindowEvent},
+    event::{ElementState, KeyEvent, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    keyboard::{KeyCode, PhysicalKey}, window,
 };
 
 use renderer::Engine;
-use scene::{Scene, camera::Camera, Light, LightKind, MeshBuilder};
-use glam::{DVec2, Quat, Vec2, Vec3, dvec2};
+use scene::{Scene, Light, LightKind, MeshBuilder};
+use glam::{Quat, Vec3, vec3};
 
 fn main() {
     // Initialize logging
@@ -22,27 +24,25 @@ fn main() {
     log::info!("Starting graphics engine...");
 
     let event_loop = EventLoop::new().expect("Failed to create event loop");
-
+    
     let mut app = App { 
-        window: None,
-        last_frame: std::time::Instant::now(), 
-        total_time: 0.0,
-        cursor_position: Vec2::NAN,
-        cursor_motion: DVec2::ZERO,
+        engine: None,
+        clock: time::Clock::now(),
+        input: input::InputBinder::default(),
+        mouse_captured: false,
     };
 
     event_loop.run_app(&mut app).expect("Event loop error");
 }
 
-struct App {
-    window: Option<(winit::window::Window, Engine, Scene)>,
-    last_frame: std::time::Instant,
-    total_time: f32,
-    cursor_position: Vec2,
-    cursor_motion: DVec2,
+struct App<'a> {
+    engine: Option<(Arc<winit::window::Window>, Engine<'a>, Scene)>,
+    clock: time::Clock,
+    input: input::InputBinder,
+    mouse_captured: bool,
 }
 
-impl winit::application::ApplicationHandler for App {
+impl<'a> winit::application::ApplicationHandler for App<'a> {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         log::info!("Application resumed.");
 
@@ -54,9 +54,10 @@ impl winit::application::ApplicationHandler for App {
             .with_inner_size(winit::dpi::PhysicalSize::new(1280, 720))
             .with_resizable(true)
         ).expect("Failed to create window on resume");
+        let window = Arc::new(window);
 
         // Initialize engine (blocks until GPU adapter/device are ready)
-        let mut engine = pollster::block_on(Engine::new(&window));
+        let mut engine = pollster::block_on(Engine::new(Arc::clone(&window)));
 
         // Build the initial scene
         let scene = build_demo_scene(&mut engine);
@@ -64,7 +65,7 @@ impl winit::application::ApplicationHandler for App {
         // Request an initial redraw to kick off the rendering loop
         window.request_redraw();
         
-        self.window = Some((window, engine, scene));
+        self.engine = Some((window, engine, scene));
     }
     
     fn window_event(
@@ -75,7 +76,7 @@ impl winit::application::ApplicationHandler for App {
     ) {
         event_loop.set_control_flow(ControlFlow::Poll);
 
-        if let Some((window, engine, scene)) = &mut self.window {
+        if let Some((window, engine, scene)) = &mut self.engine {
             if window.id() != window_id {
                 return; // Ignore events for other windows (if any)
             }
@@ -94,37 +95,34 @@ impl winit::application::ApplicationHandler for App {
 
                 WindowEvent::KeyboardInput {
                     event: KeyEvent {
-                        physical_key: PhysicalKey::Code(key),
+                        physical_key: winit::keyboard::PhysicalKey::Code(key),
                         state: ElementState::Pressed,
                         ..
                     },
                     ..
                 } => {
-                    handle_key(&key, scene, event_loop, window);
+                    if key == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) { 
+                        event_loop.exit(); 
+                    }
                 }
 
-                WindowEvent::CursorMoved { device_id, position } => {
-                    // let new_cursor_position = Vec2::new(position.x as f32, position.y as f32);
-                    // if self.cursor_position.is_nan() {
-                    //     self.cursor_position = new_cursor_position; // Initialize on first event
-                    // }
-                    // self.cursor_motion = new_cursor_position - self.cursor_position; // This will be (0.0, 0.0) for the first event
-                    // self.cursor_position = new_cursor_position;
-                }
+                WindowEvent::CursorMoved { device_id, position } => {}
 
                 WindowEvent::RedrawRequested => {
-                    let now = std::time::Instant::now();
-                    let dt = now.duration_since(self.last_frame).as_secs_f32();
-                    self.last_frame = now;
-                    self.total_time += dt;
+                    if self.input[input::ActionBinding::MouseCapture] == input::KeyState::JustPressed {
+                        if self.mouse_captured {
+                            window.set_cursor_grab(winit::window::CursorGrabMode::None).unwrap(); 
+                            window.set_cursor_visible(true);
+                            self.mouse_captured = false;
+                        } else {
+                            window.set_cursor_grab(winit::window::CursorGrabMode::Confined).unwrap(); 
+                            window.set_cursor_visible(false);
+                            self.mouse_captured = true;
+                        } 
+                    }
                     
-                    scene.camera.global_yaw(-self.cursor_motion.x as f32 * 0.002);
-                    scene.camera.pitch(-self.cursor_motion.y as f32 * 0.002);
-                
-                    // Animate scene objects
-                    scene.update(self.total_time, dt);
+                    scene.update(self.clock, &self.input);
 
-                    // scene.camera.orientation = Quat::look_at_rh(scene.camera.position, Vec3::ZERO, scene.camera.up);
                     match engine.render(&scene) {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -139,7 +137,7 @@ impl winit::application::ApplicationHandler for App {
                     }
 
                     window.request_redraw();
-                    self.cursor_motion = DVec2::ZERO; // Reset cursor motion after processing
+                    self.end_frame();           
                 }
 
                 _ => {}
@@ -149,18 +147,23 @@ impl winit::application::ApplicationHandler for App {
 
     fn device_event(
         &mut self,
-        event_loop: &winit::event_loop::ActiveEventLoop,
+        _event_loop: &winit::event_loop::ActiveEventLoop,
         device_id: winit::event::DeviceId,
         event: winit::event::DeviceEvent,
     ) {
-        if let Some((window, engine, scene)) = &mut self.window {
-            match event {
-                winit::event::DeviceEvent::MouseMotion { delta: (delta_x, delta_y) } => {
-                    self.cursor_motion = dvec2(delta_x, delta_y);
-                }
-                _ => {}
-            }   
-        }   
+        self.input.process_device_event(device_id, event);
+    }
+
+    fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+        log::info!("Closing event loop.")
+    }
+}
+
+impl<'a> App<'a> {
+    /// Start next frame.
+    fn end_frame(&mut self) {
+        self.clock = self.clock.next_frame();
+        self.input.end_frame();
     }
 }
 
@@ -187,8 +190,8 @@ fn build_demo_scene(engine: &mut Engine) -> Scene {
         kind: LightKind::Point,
         position: Vec3::new(-3.0, 2.0, 0.0),
         direction: Vec3::ZERO,
-        color: Vec3::new(0.3, 0.6, 1.0),
-        intensity: 2.0,
+        color: Vec3::new(1.0, 1.0, 1.0),
+        intensity: 10.0,
         range: 10.0,
     });
 
@@ -209,12 +212,12 @@ fn build_demo_scene(engine: &mut Engine) -> Scene {
     });
 
     // Center cube
-    let cube_mesh = MeshBuilder::cube(1.0);
+    let cube_mesh = MeshBuilder::unit_cube();
     let cube_handle = engine.upload_mesh(&cube_mesh);
     scene.objects.push(scene::SceneObject {
         mesh: cube_handle,
         position: Vec3::new(0.0, 0.0, 0.0),
-        rotation: Quat::IDENTITY,
+        rotation: Quat::from_axis_angle(vec3(0.0, 1.0, 0.0), std::f32::consts::FRAC_PI_3),
         scale: Vec3::ONE,
         material: scene::Material {
             base_color: Vec3::new(0.8, 0.2, 0.2),
@@ -277,30 +280,53 @@ fn build_demo_scene(engine: &mut Engine) -> Scene {
 }
 
 impl Scene {
-    fn update(&mut self, time: f32, dt: f32) {
+    fn update(&mut self, clock: time::Clock, input: &input::InputBinder) {
+        use input::ActionBinding::*;
+
+        self.camera.global_yaw(-input.mouse_motion().x as f32);
+        self.camera.pitch(-input.mouse_motion().y as f32);
+        let speed = 6.0;
+        let strafe = match (input[MoveRight].is_pressed(), input[MoveLeft].is_pressed()) {
+            (true, false)                 => 1.0,
+            (false, true)                => -1.0,
+            (true, true) | (false, false) => 0.0,
+        };
+        let fly = match (input[MoveUp].is_pressed(), input[MoveDown].is_pressed()) {
+            (true, false)                 => 1.0,
+            (false, true)                => -1.0,
+            (true, true) | (false, false) => 0.0,
+        };
+        let run = match (input[MoveForward].is_pressed(), input[MoveBack].is_pressed()) {
+            (true, false)                => -1.0,
+            (false, true)                 => 1.0,
+            (true, true) | (false, false) => 0.0,
+        };
+        self.camera.translate(clock.delta_time() as f32 * vec3(strafe, fly, run) * speed);
+
         // Rotate cube (index 1)
-        if let Some(obj) = self.objects.get_mut(1) {
-            obj.rotation = Quat::from_rotation_y(time * 0.8)
-                * Quat::from_rotation_x(time * 0.3);
-        }
+        // if let Some(obj) = self.objects.get_mut(1) {
+        //     obj.rotation = Quat::from_rotation_y(clock.total_time() as f32 * 0.8)
+        //     // obj.rotation = Quat::from_rotation_y(clock.total_time() as f32 * 0.8)
+        //     //     * Quat::from_rotation_x(clock.total_time() as f32 * 0.3);
+        // }
 
-        // Bob sphere (index 2)
-        if let Some(obj) = self.objects.get_mut(2) {
-            obj.position.y = 0.5 + (time * 1.2).sin() * 0.4;
-            obj.rotation = Quat::from_rotation_y(time * -0.5);
-        }
+        // // Bob sphere (index 2)
+        // if let Some(obj) = self.objects.get_mut(2) {
+        //     obj.position.y = 0.5 + (clock.total_time() as f32 * 1.2).sin() * 0.4;
+        //     obj.rotation = Quat::from_rotation_y(clock.total_time() as f32 * -0.5);
+        // }
 
-        // Spin torus (index 3)
-        if let Some(obj) = self.objects.get_mut(3) {
-            obj.rotation = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)
-                * Quat::from_rotation_z(time * 1.1);
-        }
+        // // Spin torus (index 3)
+        // if let Some(obj) = self.objects.get_mut(3) {
+        //     obj.rotation = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)
+        //         * Quat::from_rotation_z(clock.total_time() as f32 * 1.1);
+        // }
 
         // Orbit the point light and its orb proxy (index 4)
         let orbit_r = 3.0f32;
         let orbit_speed = 0.7;
-        let lx = orbit_r * (time * orbit_speed).cos();
-        let lz = orbit_r * (time * orbit_speed).sin();
+        let lx = orbit_r * (clock.total_time() as f32 * orbit_speed).cos();
+        let lz = orbit_r * (clock.total_time() as f32 * orbit_speed).sin();
         if let Some(light) = self.lights.get_mut(1) {
             light.position = Vec3::new(lx, 2.0, lz);
         }
@@ -310,27 +336,25 @@ impl Scene {
     }
 }
 
-fn handle_key(
-    key: &KeyCode,
-    scene: &mut Scene,
-    event_loop: &winit::event_loop::ActiveEventLoop,
-    window: &winit::window::Window,
-) {
-    let cam = &mut scene.camera;
-    let speed = 0.5;
+// fn handle_key(
+//     key: &input::ActionBinding,
+//     scene: &mut Scene,
+//     window: &winit::window::Window,
+// ) {
+//     let cam = &mut scene.camera;
+//     let speed = 0.5;
 
-    match key {
-        KeyCode::KeyW | KeyCode::ArrowUp    => { cam.translate(Vec3::NEG_Z * speed); }
-        KeyCode::KeyS | KeyCode::ArrowDown  => { cam.translate(Vec3::NEG_Z * -speed); }
-        KeyCode::KeyA | KeyCode::ArrowLeft  => { cam.translate(Vec3::X * -speed); }
-        KeyCode::KeyD | KeyCode::ArrowRight => { cam.translate(Vec3::X * speed); }
-        KeyCode::KeyQ                       => { cam.translate(Vec3::Y * -speed); }
-        KeyCode::KeyE                       => { cam.translate(Vec3::Y * speed); }
-        KeyCode::Escape                     => { event_loop.exit(); }
-        KeyCode::Tab                        => { 
-            window.set_cursor_grab(winit::window::CursorGrabMode::Confined).unwrap(); 
-            window.set_cursor_visible(false);
-        }
-        _ => {}
-    }
-}
+//     match key {
+//         input::ActionBinding::MoveForward => { cam.translate(Vec3::NEG_Z * speed); }
+//         input::ActionBinding::MoveBack => { cam.translate(Vec3::NEG_Z * -speed); }
+//         input::ActionBinding::MoveLeft => { cam.translate(Vec3::X * -speed); }
+//         input::ActionBinding::MoveRight => { cam.translate(Vec3::X * speed); }
+//         input::ActionBinding::MoveDown => { cam.translate(Vec3::Y * -speed); }
+//         input::ActionBinding::MoveUp => { cam.translate(Vec3::Y * speed); }
+//         input::ActionBinding::MouseCapture => { 
+//             window.set_cursor_grab(winit::window::CursorGrabMode::Confined).unwrap(); 
+//             window.set_cursor_visible(false);
+//         }
+//         _ => {}
+//     }
+// }

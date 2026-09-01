@@ -15,8 +15,8 @@ use uniforms::{CameraUniform, LightUniform, ObjectUniform, MAX_LIGHTS};
 // ─── Engine ──────────────────────────────────────────────────────────────────
 
 /// Top-level graphics engine. Owns the GPU context, pipelines, and mesh store.
-pub struct Engine {
-    pub gpu:        GpuContext,
+pub struct Engine<'a> {
+    pub gpu:        GpuContext<'a>,
     pub mesh_store: MeshStore,
 
     // Render pipeline
@@ -37,8 +37,8 @@ pub struct Engine {
     depth_view:     wgpu::TextureView,
 }
 
-impl Engine {
-    pub async fn new(window: &Window) -> Self {
+impl<'a> Engine<'a> {
+    pub async fn new(window: std::sync::Arc<Window>) -> Self {
         let gpu = GpuContext::new(window).await;
 
         // ── Bind Group Layouts ────────────────────────────────────────────

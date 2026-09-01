@@ -1,6 +1,6 @@
 pub mod camera;
 
-use glam::{Vec3, Quat, Mat4};
+use glam::{Mat3, Mat3A, Mat4, Quat, Vec3, vec2, vec3, vec4};
 
 // ─── Handle types ───────────────────────────────────────────────────────────
 
@@ -14,10 +14,10 @@ pub struct MeshHandle(pub usize);
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
-    pub position: [f32; 3],
-    pub normal:   [f32; 3],
-    pub uv:       [f32; 2],
-    pub tangent:  [f32; 4], // xyz = tangent, w = handedness
+    pub position: Vec3,
+    pub normal:   Vec3,
+    pub uv:       Vec2,
+    pub tangent:  Vec4, // xyz = tangent, w = handedness
 }
 
 impl Vertex {
@@ -65,58 +65,196 @@ pub struct Mesh {
 
 // ─── MeshBuilder ─────────────────────────────────────────────────────────────
 
+use glam::{Vec2, Vec4};
+
+pub const CUBE_VERTICES: [Vertex; 24] = [
+    // +X
+    Vertex {
+        position: vec3( 0.5, -0.5, -0.5),
+        normal:   Vec3::X,
+        uv:       vec2(0.0, 1.0),
+        tangent:  vec4(0.0, 0.0, 1.0, 1.0),
+    },
+    Vertex {
+        position: vec3( 0.5, -0.5,  0.5),
+        normal:   Vec3::X,
+        uv:       vec2(1.0, 1.0),
+        tangent:  vec4(0.0, 0.0, 1.0, 1.0),
+    },
+    Vertex {
+        position: vec3( 0.5,  0.5,  0.5),
+        normal:   Vec3::X,
+        uv:       vec2(1.0, 0.0),
+        tangent:  vec4(0.0, 0.0, 1.0, 1.0),
+    },
+    Vertex {
+        position: vec3( 0.5,  0.5, -0.5),
+        normal:   Vec3::X,
+        uv:       vec2(0.0, 0.0),
+        tangent:  vec4(0.0, 0.0, 1.0, 1.0),
+    },
+
+    // -X
+    Vertex {
+        position: vec3(-0.5, -0.5,  0.5),
+        normal:   Vec3::NEG_X,
+        uv:       vec2(0.0, 1.0),
+        tangent:  vec4(0.0, 0.0, -1.0, 1.0),
+    },
+    Vertex {
+        position: vec3(-0.5, -0.5, -0.5),
+        normal:   Vec3::NEG_X,
+        uv:       vec2(1.0, 1.0),
+        tangent:  vec4(0.0, 0.0, -1.0, 1.0),
+    },
+    Vertex {
+        position: vec3(-0.5,  0.5, -0.5),
+        normal:   Vec3::NEG_X,
+        uv:       vec2(1.0, 0.0),
+        tangent:  vec4(0.0, 0.0, -1.0, 1.0),
+    },
+    Vertex {
+        position: vec3(-0.5,  0.5,  0.5),
+        normal:   Vec3::NEG_X,
+        uv:       vec2(0.0, 0.0),
+        tangent:  vec4(0.0, 0.0, -1.0, 1.0),
+    },
+
+    // +Y
+    Vertex {
+        position: vec3(-0.5,  0.5, -0.5),
+        normal:   Vec3::Y,
+        uv:       vec2(0.0, 1.0),
+        tangent:  vec4(1.0, 0.0, 0.0, 1.0),
+    },
+    Vertex {
+        position: vec3( 0.5,  0.5, -0.5),
+        normal:   Vec3::Y,
+        uv:       vec2(1.0, 1.0),
+        tangent:  vec4(1.0, 0.0, 0.0, 1.0),
+    },
+    Vertex {
+        position: vec3( 0.5,  0.5,  0.5),
+        normal:   Vec3::Y,
+        uv:       vec2(1.0, 0.0),
+        tangent:  vec4(1.0, 0.0, 0.0, 1.0),
+    },
+    Vertex {
+        position: vec3(-0.5,  0.5,  0.5),
+        normal:   Vec3::Y,
+        uv:       vec2(0.0, 0.0),
+        tangent:  vec4(1.0, 0.0, 0.0, 1.0),
+    },
+
+    // -Y
+    Vertex {
+        position: vec3(-0.5, -0.5,  0.5),
+        normal:   Vec3::NEG_Y,
+        uv:       vec2(0.0, 1.0),
+        tangent:  vec4(1.0, 0.0, 0.0, 1.0),
+    },
+    Vertex {
+        position: vec3( 0.5, -0.5,  0.5),
+        normal:   Vec3::NEG_Y,
+        uv:       vec2(1.0, 1.0),
+        tangent:  vec4(1.0, 0.0, 0.0, 1.0),
+    },
+    Vertex {
+        position: vec3( 0.5, -0.5, -0.5),
+        normal:   Vec3::NEG_Y,
+        uv:       vec2(1.0, 0.0),
+        tangent:  vec4(1.0, 0.0, 0.0, 1.0),
+    },
+    Vertex {
+        position: vec3(-0.5, -0.5, -0.5),
+        normal:   Vec3::NEG_Y,
+        uv:       vec2(0.0, 0.0),
+        tangent:  vec4(1.0, 0.0, 0.0, 1.0),
+    },
+
+    // +Z
+    Vertex {
+        position: vec3(-0.5, -0.5,  0.5),
+        normal:   Vec3::Z,
+        uv:       vec2(0.0, 1.0),
+        tangent:  vec4(1.0, 0.0, 0.0, 1.0),
+    },
+    Vertex {
+        position: vec3(-0.5,  0.5,  0.5),
+        normal:   Vec3::Z,
+        uv:       vec2(0.0, 0.0),
+        tangent:  vec4(1.0, 0.0, 0.0, 1.0),
+    },
+    Vertex {
+        position: vec3( 0.5,  0.5,  0.5),
+        normal:   Vec3::Z,
+        uv:       vec2(1.0, 0.0),
+        tangent:  vec4(1.0, 0.0, 0.0, 1.0),
+    },
+    Vertex {
+        position: vec3( 0.5, -0.5,  0.5),
+        normal:   Vec3::Z,
+        uv:       vec2(1.0, 1.0),
+        tangent:  vec4(1.0, 0.0, 0.0, 1.0),
+    },
+
+    // -Z
+    Vertex {
+        position: vec3( 0.5, -0.5, -0.5),
+        normal:   Vec3::NEG_Z,
+        uv:       vec2(0.0, 1.0),
+        tangent:  vec4(-1.0, 0.0, 0.0, 1.0),
+    },
+    Vertex {
+        position: vec3( 0.5,  0.5, -0.5),
+        normal:   Vec3::NEG_Z,
+        uv:       vec2(0.0, 0.0),
+        tangent:  vec4(-1.0, 0.0, 0.0, 1.0),
+    },
+    Vertex {
+        position: vec3(-0.5,  0.5, -0.5),
+        normal:   Vec3::NEG_Z,
+        uv:       vec2(1.0, 0.0),
+        tangent:  vec4(-1.0, 0.0, 0.0, 1.0),
+    },
+    Vertex {
+        position: vec3(-0.5, -0.5, -0.5),
+        normal:   Vec3::NEG_Z,
+        uv:       vec2(1.0, 1.0),
+        tangent:  vec4(-1.0, 0.0, 0.0, 1.0),
+    },
+];
+
+pub const CUBE_INDICES: [u32; 36] = [
+    // +X
+    0, 2, 1,
+    0, 3, 2,
+    // -X
+    4, 6, 5,
+    4, 7, 6,
+    // +Y
+    8, 10, 9,
+    8, 11, 10,
+    // -Y
+    12, 14, 13,
+    12, 15, 14,
+    // +Z
+    16, 18, 17,
+    16, 19, 18,
+    // -Z
+    20, 22, 21,
+    20, 23, 22,
+];
+
 pub struct MeshBuilder;
 
 impl MeshBuilder {
-    // ── Cube ─────────────────────────────────────────────────────────────
-    pub fn cube(size: f32) -> Mesh {
-        let h = size * 0.5;
-
-        // face: (normal, up, right) → 4 vertices + 6 indices
-        let faces: [([f32;3], [f32;3], [f32;3]); 6] = [
-            ([ 0.0,  0.0,  1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]), // front
-            ([ 0.0,  0.0, -1.0], [0.0, 1.0, 0.0], [-1.0,0.0, 0.0]), // back
-            ([-1.0,  0.0,  0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]), // left
-            ([ 1.0,  0.0,  0.0], [0.0, 1.0, 0.0], [0.0, 0.0,-1.0]), // right
-            ([ 0.0,  1.0,  0.0], [0.0, 0.0,-1.0], [1.0, 0.0, 0.0]), // top
-            ([ 0.0, -1.0,  0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]), // bottom
-        ];
-
-        let uvs = [[0.0f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
-        let mut vertices = Vec::with_capacity(24);
-        let mut indices  = Vec::with_capacity(36);
-
-        for (n, u, r) in &faces {
-            let nv   = Vec3::from(*n);
-            let uv   = Vec3::from(*u);
-            let rv   = Vec3::from(*r);
-            let base = vertices.len() as u32;
-
-            let corners = [
-                (-rv - uv) * h, // bl
-                ( rv - uv) * h, // br
-                ( rv + uv) * h, // tr
-                (-rv + uv) * h, // tl
-            ];
-
-            for (i, pos) in corners.iter().enumerate() {
-                let center = nv * h;
-                vertices.push(Vertex {
-                    position: (center + *pos).to_array(),
-                    normal:   nv.to_array(),
-                    uv:       uvs[i],
-                    tangent:  [rv.x, rv.y, rv.z, 1.0],
-                });
-            }
-
-            // Two triangles per face
-            indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
-        }
-
-        Mesh { vertices, indices }
+    /// Centered 1x1x1 cube
+    pub fn unit_cube() -> Mesh {
+        Mesh { vertices: CUBE_VERTICES.to_vec(), indices: CUBE_INDICES.to_vec() }
     }
 
-    // ── UV Sphere ─────────────────────────────────────────────────────────
+    /// UV Sphere
     pub fn sphere(radius: f32, sectors: u32, stacks: u32) -> Mesh {
         let mut vertices = Vec::new();
         let mut indices  = Vec::new();
@@ -131,14 +269,14 @@ impl MeshBuilder {
                 let x = r * theta.cos();
                 let z = r * theta.sin();
 
-                let pos = Vec3::new(x, y, z);
-                let tangent = Vec3::new(-theta.sin(), 0.0, theta.cos());
+                let pos = vec3(x, y, z);
+                let tangent = vec3(-theta.sin(), 0.0, theta.cos());
 
                 vertices.push(Vertex {
-                    position: (pos * radius).to_array(),
-                    normal:   pos.to_array(),
-                    uv:       [sector as f32 / sectors as f32, stack as f32 / stacks as f32],
-                    tangent:  [tangent.x, tangent.y, tangent.z, 1.0],
+                    position: pos * radius,
+                    normal:   pos,
+                    uv:       vec2(sector as f32 / sectors as f32, stack as f32 / stacks as f32),
+                    tangent:  tangent.extend(1.0),
                 });
             }
         }
@@ -148,15 +286,14 @@ impl MeshBuilder {
             for sector in 0..sectors {
                 let a = stack * row + sector;
                 let b = a + row;
-                if stack != 0        { indices.extend_from_slice(&[a, b, a+1]); }
-                if stack != stacks-1 { indices.extend_from_slice(&[a+1, b, b+1]); }
+                if stack != 0        { indices.extend_from_slice(&[a+1, b, a]); }
+                if stack != stacks-1 { indices.extend_from_slice(&[b+1, b, a+1]); }
             }
         }
 
         Mesh { vertices, indices }
     }
 
-    // ── Torus ─────────────────────────────────────────────────────────────
     pub fn torus(major_r: f32, minor_r: f32, major_seg: u32, minor_seg: u32) -> Mesh {
         use std::f32::consts::TAU;
         let mut vertices = Vec::new();
@@ -166,26 +303,27 @@ impl MeshBuilder {
             let u     = TAU * i as f32 / major_seg as f32;
             let cos_u = u.cos();
             let sin_u = u.sin();
-            let center = Vec3::new(major_r * cos_u, 0.0, major_r * sin_u);
+            let center = vec3(major_r * cos_u, 0.0, major_r * sin_u);
 
             for j in 0..=minor_seg {
                 let v     = TAU * j as f32 / minor_seg as f32;
                 let cos_v = v.cos();
                 let sin_v = v.sin();
 
-                let pos = Vec3::new(
+                let position = vec3(
                     (major_r + minor_r * cos_v) * cos_u,
                      minor_r * sin_v,
                     (major_r + minor_r * cos_v) * sin_u,
                 );
-                let normal = (pos - center).normalize();
-                let tangent = Vec3::new(-sin_u, 0.0, cos_u);
+                let normal = (position - center).normalize();
+                let tangent = vec3(-sin_u, 0.0, cos_u);
 
+                
                 vertices.push(Vertex {
-                    position: pos.to_array(),
-                    normal:   normal.to_array(),
-                    uv:       [i as f32 / major_seg as f32, j as f32 / minor_seg as f32],
-                    tangent:  [tangent.x, tangent.y, tangent.z, 1.0],
+                    position,
+                    normal,
+                    uv:       vec2(i as f32 / major_seg as f32, j as f32 / minor_seg as f32),
+                    tangent:  tangent.extend(1.0),
                 });
             }
         }
@@ -195,14 +333,13 @@ impl MeshBuilder {
             for j in 0..minor_seg {
                 let a = i * row + j;
                 let b = a + row;
-                indices.extend_from_slice(&[a, b, a+1, a+1, b, b+1]);
+                indices.extend_from_slice(&[b+1, b, a+1, a+1, b, a]);
             }
         }
 
         Mesh { vertices, indices }
     }
 
-    // ── Plane ─────────────────────────────────────────────────────────────
     pub fn plane(width: f32, depth: f32, w_segs: u32, d_segs: u32) -> Mesh {
         let mut vertices = Vec::new();
         let mut indices  = Vec::new();
@@ -213,10 +350,10 @@ impl MeshBuilder {
                 let fz = z as f32 / d_segs as f32;
 
                 vertices.push(Vertex {
-                    position: [(fx - 0.5) * width, 0.0, (fz - 0.5) * depth],
-                    normal:   [0.0, 1.0, 0.0],
-                    uv:       [fx, fz],
-                    tangent:  [1.0, 0.0, 0.0, 1.0],
+                    position: vec3((fx - 0.5) * width, 0.0, (fz - 0.5) * depth),
+                    normal:   Vec3::Y,
+                    uv:       vec2(fx, fz),
+                    tangent:  vec4(1.0, 0.0, 0.0, 1.0),
                 });
             }
         }
@@ -234,8 +371,6 @@ impl MeshBuilder {
     }
 }
 
-// ─── Material ───────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug)]
 pub struct Material {
     pub base_color: Vec3,
@@ -243,8 +378,6 @@ pub struct Material {
     pub roughness:  f32,
     pub emissive:   Vec3,
 }
-
-// ─── SceneObject ────────────────────────────────────────────────────────────
 
 pub struct SceneObject {
     pub mesh:     MeshHandle,
@@ -257,47 +390,14 @@ pub struct SceneObject {
 impl SceneObject {
     pub fn model(&self) -> Mat4 {
         Mat4::from_translation(self.position) 
-        * Mat4::from_quat(self.rotation) 
-        * Mat4::from_scale(self.scale)
+        * Mat4::from_quat(self.rotation)
+        .mul_diagonal_scale(self.scale.extend(1.0))
+    }
+
+    pub fn normal_matrix(&self) -> Mat3A {
+        Mat3A::from_quat(self.rotation).mul_diagonal_scale(self.scale.recip())
     }
 } 
-
-// ─── Camera ──────────────────────────────────────────────────────────────────
-
-// pub struct Camera {
-//     pub eye:     Vec3,
-//     pub target:  Vec3,
-//     pub up:      Vec3,
-//     pub fovy:    f32,
-//     pub aspect:  f32,
-//     pub near:    f32,
-//     pub far:     f32,
-// }
-
-// impl Camera {
-//     pub fn new(
-//         eye: Vec3, target: Vec3, up: Vec3,
-//         fovy: f32, aspect: f32, near: f32, far: f32,
-//     ) -> Self {
-//         Self { eye, target, up, fovy, aspect, near, far }
-//     }
-
-//     pub fn view_matrix(&self) -> Mat4 {
-//         Mat4::look_at_rh(self.eye, self.target, self.up)
-//     }
-
-//     pub fn projection_matrix(&self) -> Mat4 {
-//         Mat4::perspective_rh(self.fovy, self.aspect, self.near, self.far)
-//     }
-
-//     pub fn view_proj(&self) -> Mat4 {
-//         self.projection_matrix() * self.view_matrix()
-//     }
-
-//     pub fn update_aspect(&mut self, aspect: f32) {
-//         self.aspect = aspect;
-//     }
-// }
 
 // ─── Light ──────────────────────────────────────────────────────────────────
 
@@ -331,12 +431,12 @@ impl Scene {
     pub fn new() -> Self {
         Self {
             camera:  camera::Camera::new(
-                Vec3::new(0.0, 2.0, 5.0),
+                vec3(0.0, 2.0, 5.0),
                 16.0 / 9.0,
             ),
             objects: Vec::new(),
             lights:  Vec::new(),
-            ambient: Vec3::new(0.05, 0.05, 0.08),
+            ambient: vec3(0.05, 0.05, 0.08),
         }
     }
 }

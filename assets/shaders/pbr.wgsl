@@ -4,24 +4,28 @@
 //  Model: metallic-roughness workflow
 // ═══════════════════════════════════════════════════════════════════════════
 
+const DIRECTION_LIGHT: u32 = 0;
+const POINT_LIGHT: u32 = 1;
+const SPOT_LIGHT: u32 = 2;
+
 // ─── Bind Groups ─────────────────────────────────────────────────────────────
 
 struct CameraUniform {
-    view_proj : mat4x4<f32>,
-    eye_pos   : vec3<f32>,
+    view_proj : mat4x4f,
+    eye_pos   : vec3f,
     _pad      : f32,
 }
 
 struct LightUniform {
-    position  : vec3<f32>,
+    position  : vec3f,
     kind      : u32,      // 0=directional, 1=point, 2=spot
-    direction : vec3<f32>,
+    direction : vec3f,
     intensity : f32,
-    color     : vec3<f32>,
+    color     : vec3f,
     range     : f32,
     inner_cos : f32,
     outer_cos : f32,
-    _pad      : vec2<f32>,
+    _pad      : vec2f,
 }
 
 struct LightsBlock {
@@ -33,49 +37,56 @@ struct LightsBlock {
 }
 
 struct ObjectUniform {
-    model          : mat4x4<f32>,
-    normal_matrix  : mat4x4<f32>,
-    base_color     : vec3<f32>,
+    model          : mat4x4f,
+    normal_matrix0 : vec4f,
+    normal_matrix1 : vec4f,
+    normal_matrix2 : vec4f,
+    base_color     : vec3f,
     metallic       : f32,
     roughness      : f32,
     _pad0          : f32,
     _pad1          : f32,
     _pad2          : f32,
-    emissive       : vec3<f32>,
+    emissive       : vec3f,
     _pad3          : f32,
 }
 
-@group(0) @binding(0) var<uniform> camera  : CameraUniform;
-@group(0) @binding(1) var<uniform> lights  : LightsBlock;
-@group(1) @binding(0) var<uniform> object  : ObjectUniform;
+// group 0
+@group(0) @binding(0) var<uniform> camera : CameraUniform;
+@group(0) @binding(1) var<uniform> lights : LightsBlock;
+
+// group 1
+@group(1) @binding(0) var<uniform> object : ObjectUniform;
 
 // ─── Vertex I/O ──────────────────────────────────────────────────────────────
 
 struct VertexIn {
-    @location(0) position : vec3<f32>,
-    @location(1) normal   : vec3<f32>,
-    @location(2) uv       : vec2<f32>,
-    @location(3) tangent  : vec4<f32>,
+    @location(0) position : vec3f,
+    @location(1) normal   : vec3f,
+    @location(2) uv       : vec2f,
+    @location(3) tangent  : vec4f,
 }
 
 struct VertexOut {
-    @builtin(position) clip_pos  : vec4<f32>,
-    @location(0)       world_pos : vec3<f32>,
-    @location(1)       world_nor : vec3<f32>,
-    @location(2)       uv        : vec2<f32>,
-    @location(3)       tangent   : vec3<f32>,
-    @location(4)       bitangent : vec3<f32>,
+    @builtin(position) clip_pos  : vec4f,
+    @location(0)       world_pos : vec3f,
+    @location(1)       world_nor : vec3f,
+    @location(2)       uv        : vec2f,
+    @location(3)       tangent   : vec3f,
+    @location(4)       bitangent : vec3f,
 }
 
 // ─── Vertex Shader ───────────────────────────────────────────────────────────
 
 @vertex
 fn vs_main(v: VertexIn) -> VertexOut {
-    let world_pos = object.model * vec4<f32>(v.position, 1.0);
+    let normal_matrix = mat3x3(object.normal_matrix0.xyz, object.normal_matrix1.xyz, object.normal_matrix2.xyz);
+
+    let world_pos = object.model * vec4f(v.position, 1.0);
 
     // Transform normal & tangent using the normal matrix (ignores non-uniform scale)
-    let world_nor = normalize((object.normal_matrix * vec4<f32>(v.normal, 0.0)).xyz);
-    let world_tan = normalize((object.model         * vec4<f32>(v.tangent.xyz, 0.0)).xyz);
+    let world_nor = normalize((normal_matrix * v.normal).xyz);
+    let world_tan = normalize((normal_matrix * v.tangent.xyz).xyz);
     let world_bit = cross(world_nor, world_tan) * v.tangent.w;
 
     var out: VertexOut;
@@ -93,7 +104,7 @@ fn vs_main(v: VertexIn) -> VertexOut {
 const PI : f32 = 3.14159265358979;
 
 // Normal Distribution Function – GGX / Trowbridge-Reitz
-fn distribution_ggx(N: vec3<f32>, H: vec3<f32>, roughness: f32) -> f32 {
+fn distribution_ggx(N: vec3f, H: vec3f, roughness: f32) -> f32 {
     let a = roughness * roughness;
     let a2 = a * a;
     let NdotH = max(dot(N, H), 0.0);
@@ -108,7 +119,7 @@ fn geometry_schlick_ggx(NdotV: f32, roughness: f32) -> f32 {
     return NdotV / (NdotV * (1.0 - k) + k);
 }
 
-fn geometry_smith(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, roughness: f32) -> f32 {
+fn geometry_smith(N: vec3f, V: vec3f, L: vec3f, roughness: f32) -> f32 {
     let NdotV = max(dot(N, V), 0.0);
     let NdotL = max(dot(N, L), 0.0);
     return geometry_schlick_ggx(NdotV, roughness) * geometry_schlick_ggx(NdotL, roughness);
@@ -120,22 +131,22 @@ fn pow5(x: f32) -> f32 {
 }
 
 // Fresnel – Schlick approximation
-fn fresnel_schlick(cos_theta: f32, F0: vec3<f32>) -> vec3<f32> {
+fn fresnel_schlick(cos_theta: f32, F0: vec3f) -> vec3f {
     return F0 + (1.0 - F0) * pow5(clamp(1.0 - cos_theta, 0.0, 1.0));
 }
 
 // Cook-Torrance BRDF contribution for one light direction
 fn brdf(
-    N:         vec3<f32>,
-    V:         vec3<f32>,
-    L:         vec3<f32>,
-    base_col:  vec3<f32>,
-    metallic:  f32,
-    roughness: f32,
-) -> vec3<f32> {
+    N         : vec3f,
+    V         : vec3f,
+    L         : vec3f,
+    base_col  : vec3f,
+    metallic  : f32,
+    roughness : f32,
+) -> vec3f {
     let H = normalize(V + L);
 
-    let F0 = mix(vec3<f32>(0.04), base_col, metallic);
+    let F0 = mix(vec3f(0.04), base_col, metallic);
 
     let D = distribution_ggx(N, H, roughness);
     let G = geometry_smith(N, V, L, roughness);
@@ -148,7 +159,7 @@ fn brdf(
     let specular = (D * G * F) / specular_denom;
 
     // Energy conservation: kD = (1-F) * (1-metallic)
-    let kD = (vec3<f32>(1.0) - F) * (1.0 - metallic);
+    let kD = (vec3f(1.0) - F) * (1.0 - metallic);
     let diffuse = kD * base_col / PI;
 
     return (diffuse + specular) * NdotL;
@@ -163,12 +174,12 @@ fn distance_attenuation(dist: f32, range: f32) -> f32 {
 
 fn eval_directional_light(
     light: LightUniform,
-    N:     vec3<f32>,
-    V:     vec3<f32>,
-    base_col:  vec3<f32>,
+    N:     vec3f,
+    V:     vec3f,
+    base_col:  vec3f,
     metallic:  f32,
     roughness: f32,
-) -> vec3<f32> {
+) -> vec3f {
     let L = normalize(-light.direction);
     let radiance = light.color * light.intensity;
     return brdf(N, V, L, base_col, metallic, roughness) * radiance;
@@ -176,13 +187,13 @@ fn eval_directional_light(
 
 fn eval_point_light(
     light: LightUniform,
-    N:     vec3<f32>,
-    V:     vec3<f32>,
-    world_pos: vec3<f32>,
-    base_col:  vec3<f32>,
+    N:     vec3f,
+    V:     vec3f,
+    world_pos: vec3f,
+    base_col:  vec3f,
     metallic:  f32,
     roughness: f32,
-) -> vec3<f32> {
+) -> vec3f {
     let enlonged_L = light.position - world_pos;
     let distance = length(enlonged_L);
     let L = enlonged_L / distance;
@@ -194,7 +205,7 @@ fn eval_point_light(
 // ─── Fragment Shader ─────────────────────────────────────────────────────────
 
 @fragment
-fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let N          = normalize(in.world_nor);
     let V          = normalize(camera.eye_pos - in.world_pos);
     let base_color = object.base_color;
@@ -203,24 +214,24 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
     // Ambient (IBL placeholder: simple hemisphere)
     let ambient_intensity = 0.04;
-    let up_factor  = max(dot(N, vec3<f32>(0.0, 1.0, 0.0)), 0.0);
-    let sky_color  = vec3<f32>(0.3, 0.5, 0.9) * up_factor;
-    let grnd_color = vec3<f32>(0.15, 0.12, 0.1) * (1.0 - up_factor);
+    let up_factor  = max(dot(N, vec3f(0.0, 1.0, 0.0)), 0.0);
+    let sky_color  = vec3f(0.3, 0.5, 0.9) * up_factor;
+    let grnd_color = vec3f(0.15, 0.12, 0.1) * (1.0 - up_factor);
     let ambient    = (sky_color + grnd_color) * ambient_intensity * base_color;
 
-    var Lo = vec3<f32>(0.0);
+    var Lo = vec3f(0.0);
 
     for (var i = 0u; i < lights.count; i++) {
         let light = lights.lights[i];
-        var L        : vec3<f32>;
-        var radiance : vec3<f32>;
+        var L        : vec3f;
+        var radiance : vec3f;
 
-        if light.kind == 0u {
+        if light.kind == DIRECTION_LIGHT {
             // ── Directional ────────────────────────────────────────────
             L         = normalize(-light.direction);
             radiance  = light.color * light.intensity;
 
-        } else if light.kind == 1u {
+        } else if light.kind == POINT_LIGHT {
             // ── Point ──────────────────────────────────────────────────
             let diff  = light.position - in.world_pos;
             L         = normalize(diff);
@@ -245,11 +256,5 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
     var color = ambient + Lo + object.emissive;
 
-    // Reinhard tone-mapping
-    color = color / (color + vec3<f32>(1.0));
-
-    // Gamma correction (linear → sRGB approximation)
-    color = pow(color, vec3<f32>(1.0 / 2.2));
-
-    return vec4<f32>(color, 1.0);
+    return vec4f(color, 1.0);
 }

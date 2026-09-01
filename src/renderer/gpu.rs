@@ -1,35 +1,28 @@
 use winit::window::Window;
 
 /// Holds the core wgpu objects.
-pub struct GpuContext {
+pub struct GpuContext<'a> {
     pub instance:       wgpu::Instance,
-    pub surface:        wgpu::Surface<'static>,
+    pub surface:        wgpu::Surface<'a>,
     pub adapter:        wgpu::Adapter,
     pub device:         wgpu::Device,
     pub queue:          wgpu::Queue,
     pub surface_config: wgpu::SurfaceConfiguration,
 }
 
-impl GpuContext {
-    pub async fn new(window: &Window) -> Self {
+impl<'a> GpuContext<'a> {
+    pub async fn new(window: std::sync::Arc<Window>) -> Self {
         let size = window.inner_size();
 
-        // ── Instance ─────────────────────────────────────────────────────
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
 
-        // ── Surface ──────────────────────────────────────────────────────
-        // SAFETY: The window lives at least as long as the surface.
-        let surface = unsafe {
-            instance.create_surface_unsafe(
-                wgpu::SurfaceTargetUnsafe::from_window(window)
-                    .expect("Failed to create surface target"),
-            )
-        }.expect("Failed to create surface");
+        let surface = instance.create_surface(
+        wgpu::SurfaceTarget::from(window)
+        ).expect("Failed to create surface");
 
-        // ── Adapter ──────────────────────────────────────────────────────
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference:       wgpu::PowerPreference::HighPerformance,
@@ -39,10 +32,13 @@ impl GpuContext {
             .await
             .expect("No compatible GPU adapter found");
 
-        log::info!("Adapter: {:?}", adapter.get_info().name);
-        log::info!("Backend: {:?}", adapter.get_info().backend);
+        let adapter_info = adapter.get_info();
+        log::info!("Adapter: {}", adapter_info.name);
+        log::info!("Backend: {:?}", adapter_info.backend);
+        log::info!("Device Type: {:?}", adapter_info.device_type);
+        log::debug!("Driver: {}", adapter_info.driver);
+        log::debug!("Driver Info: {}", adapter_info.driver_info);
 
-        // ── Device + Queue ────────────────────────────────────────────────
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
