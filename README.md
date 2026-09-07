@@ -1,13 +1,13 @@
 # wgpu Graphics Engine
 
-A physically-based 3D graphics engine written in Rust using **wgpu** and **winit**.
+A physically-based 3D graphics renderer written in Rust using **wgpu** and **winit**.
 
 ## Features
 
 | Feature | Details |
 |---|---|
 | **PBR Shading** | Cook-Torrance GGX microfacet BRDF, metallic-roughness workflow |
-| **Multiple light types** | Directional, point, and spot lights (up to 8 simultaneous) |
+| **Multiple light types** | Directional, point, and spot lights |
 | **Keyboard navigation** | WASD / Arrow keys + Q/E to fly the camera |
 | **Cross-platform** | Vulkan, Metal, DX12, DX11, WebGPU backends via wgpu |
 
