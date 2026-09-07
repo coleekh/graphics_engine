@@ -4,36 +4,12 @@
 //  Model: metallic-roughness workflow
 // ═══════════════════════════════════════════════════════════════════════════
 
-const DIRECTION_LIGHT: u32 = 0;
-const POINT_LIGHT: u32 = 1;
-const SPOT_LIGHT: u32 = 2;
-
 // ─── Bind Groups ─────────────────────────────────────────────────────────────
 
 struct CameraUniform {
     view_proj : mat4x4f,
     eye_pos   : vec3f,
     _pad      : f32,
-}
-
-struct LightUniform {
-    position  : vec3f,
-    kind      : u32,      // 0=directional, 1=point, 2=spot
-    direction : vec3f,
-    intensity : f32,
-    color     : vec3f,
-    range     : f32,
-    inner_cos : f32,
-    outer_cos : f32,
-    _pad      : vec2f,
-}
-
-struct LightsBlock {
-    count  : u32,
-    _pad0  : u32,
-    _pad1  : u32,
-    _pad2  : u32,
-    lights : array<LightUniform, 8>,
 }
 
 struct ObjectUniform {
@@ -99,6 +75,31 @@ fn vs_main(v: VertexIn) -> VertexOut {
     return out;
 }
 
+// ─── Fragment Shader ─────────────────────────────────────────────────────────
+const DIRECTION_LIGHT: u32 = 0;
+const POINT_LIGHT: u32 = 1;
+const SPOT_LIGHT: u32 = 2;
+
+struct LightUniform {
+    position  : vec3f,
+    kind      : u32,      // 0=directional, 1=point, 2=spot
+    direction : vec3f,
+    intensity : f32,
+    color     : vec3f,
+    range     : f32,
+    inner_cos : f32,
+    outer_cos : f32,
+    _pad      : vec2f,
+}
+
+struct LightsBlock {
+    count  : u32,
+    _pad0  : u32,
+    _pad1  : u32,
+    _pad2  : u32,
+    lights : array<LightUniform, 8>,
+}
+
 // ─── PBR Math ────────────────────────────────────────────────────────────────
 
 const PI : f32 = 3.14159265358979;
@@ -125,9 +126,13 @@ fn geometry_smith(N: vec3f, V: vec3f, L: vec3f, roughness: f32) -> f32 {
     return geometry_schlick_ggx(NdotV, roughness) * geometry_schlick_ggx(NdotL, roughness);
 }
 
-fn pow5(x: f32) -> f32 {
+fn pow4(x: f32) -> f32 {
     let x2 = x * x;
-    return x2 * x2 * x;
+    return x2 * x2;
+}
+
+fn pow5(x: f32) -> f32 {
+    return pow4(x) * x;
 }
 
 // Fresnel – Schlick approximation
@@ -166,43 +171,12 @@ fn brdf(
 }
 
 // Attenuation for point / spot lights
-fn distance_attenuation(dist: f32, range: f32) -> f32 {
+fn attenuation(distance: f32, range: f32) -> f32 {
     if range <= 0.0 { return 1.0; }
-    let x = max(1.0 - pow(dist / range, 4.0), 0.0);
-    return x * x / (dist * dist + 1.0);
+    let x = max(1.0 - pow4(distance / range), 0.0);
+    return x * x / (distance * distance + 1.0);
 }
 
-fn eval_directional_light(
-    light: LightUniform,
-    N:     vec3f,
-    V:     vec3f,
-    base_col:  vec3f,
-    metallic:  f32,
-    roughness: f32,
-) -> vec3f {
-    let L = normalize(-light.direction);
-    let radiance = light.color * light.intensity;
-    return brdf(N, V, L, base_col, metallic, roughness) * radiance;
-}
-
-fn eval_point_light(
-    light: LightUniform,
-    N:     vec3f,
-    V:     vec3f,
-    world_pos: vec3f,
-    base_col:  vec3f,
-    metallic:  f32,
-    roughness: f32,
-) -> vec3f {
-    let enlonged_L = light.position - world_pos;
-    let distance = length(enlonged_L);
-    let L = enlonged_L / distance;
-    let attenuation = distance_attenuation(distance, light.range);
-    let radiance = light.color * light.intensity * attenuation;
-    return brdf(N, V, L, base_col, metallic, roughness) * radiance;
-}
-
-// ─── Fragment Shader ─────────────────────────────────────────────────────────
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4f {
@@ -236,7 +210,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
             let diff  = light.position - in.world_pos;
             L         = normalize(diff);
             let dist  = length(diff);
-            let atten = distance_attenuation(dist, light.range);
+            let atten = attenuation(dist, light.range);
             radiance  = light.color * light.intensity * atten;
 
         } else {
@@ -247,7 +221,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
             let theta = dot(L, normalize(-light.direction));
             let eps   = light.inner_cos - light.outer_cos;
             let spot  = clamp((theta - light.outer_cos) / eps, 0.0, 1.0);
-            let atten = distance_attenuation(dist, light.range) * spot;
+            let atten = attenuation(dist, light.range) * spot;
             radiance  = light.color * light.intensity * atten;
         }
 

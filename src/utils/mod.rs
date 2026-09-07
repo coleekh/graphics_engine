@@ -56,8 +56,8 @@ pub fn load_texture(
     Ok((texture, view, sampler))
 }
 
-fn mip_levels(w: u32, h: u32) -> u32 {
-    (w.max(h) as f32).log2().floor() as u32 + 1
+fn mip_levels(width: u32, height: u32) -> u32 {
+    (width.max(height) as f32).log2().floor() as u32 + 1
 }
 
 // ─── FPS Counter ─────────────────────────────────────────────────────────────

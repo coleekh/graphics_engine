@@ -1,6 +1,6 @@
 # wgpu Graphics Engine
 
-A modular, physically-based 3D graphics engine written in Rust using **wgpu** and **winit**.
+A physically-based 3D graphics engine written in Rust using **wgpu** and **winit**.
 
 ## Features
 
@@ -8,10 +8,6 @@ A modular, physically-based 3D graphics engine written in Rust using **wgpu** an
 |---|---|
 | **PBR Shading** | Cook-Torrance GGX microfacet BRDF, metallic-roughness workflow |
 | **Multiple light types** | Directional, point, and spot lights (up to 8 simultaneous) |
-| **Geometry builders** | Cube, UV sphere, torus, plane — all with normals, UVs & tangents |
-| **Depth buffering** | Depth32Float, back-face culling |
-| **Tone mapping** | Reinhard + gamma correction (2.2) |
-| **Texture loading** | PNG/JPEG via the `image` crate, auto-mip-level count |
 | **Keyboard navigation** | WASD / Arrow keys + Q/E to fly the camera |
 | **Cross-platform** | Vulkan, Metal, DX12, DX11, WebGPU backends via wgpu |
 
@@ -22,19 +18,13 @@ A modular, physically-based 3D graphics engine written in Rust using **wgpu** an
 ### Prerequisites
 
 - Rust **1.75+** (`rustup update stable`)
-- A GPU with Vulkan, Metal, or DX12 support
+- A GPU with Vulkan, Metal, DX11, or DX12 support
 
 ### Build & Run
 
 ```bash
 cd graphics_engine
 cargo run --release
-```
-
-For verbose logging:
-
-```bash
-RUST_LOG=debug cargo run --release
 ```
 
 ---
@@ -50,6 +40,7 @@ RUST_LOG=debug cargo run --release
 | **Q** | Move up |
 | **E** | Move down |
 | **Esc** | Quit |
+| **Tab** | Capture/Uncapture mouse | 
 
 ---
 
@@ -63,6 +54,8 @@ graphics_engine/
 │       └── pbr.wgsl          # Cook-Torrance GGX PBR shader
 └── src/
     ├── main.rs               # Entry point, event loop, demo scene
+    ├── time.rs               # Clock (delta time)
+    ├── input.rs              # Key bindings
     ├── scene/
     │   └── mod.rs            # Camera, Light, Material, SceneObject, MeshBuilder
     ├── renderer/
@@ -71,8 +64,8 @@ graphics_engine/
     │   ├── pipeline.rs       # PBR render pipeline creation
     │   ├── mesh_store.rs     # GPU buffer management (vertex + index)
     │   └── uniforms.rs       # CameraUniform, LightUniform, ObjectUniform
-    └── utils/
-        └── mod.rs            # Texture loader, FPS counter, Timer
+    ├─── utils/
+    │    └── mod.rs           # Texture loader, FPS counter, Timer
 ```
 
 ### Key Data Flow
@@ -92,16 +85,6 @@ EventLoop → main.rs
 
 ## Extending the Engine
 
-### Add a new mesh primitive
-
-In `src/scene/mod.rs`, add a method to `MeshBuilder`:
-
-```rust
-pub fn cylinder(radius: f32, height: f32, segments: u32) -> Mesh {
-    // build vertices + indices...
-}
-```
-
 ### Add a texture to a material
 
 Use `utils::load_texture()` and extend `ObjectUniform` + the WGSL shader to sample it.
@@ -115,14 +98,5 @@ Use `utils::load_texture()` and extend `ObjectUniform` + the WGSL shader to samp
 
 ---
 
-## Dependencies
-
-| Crate | Purpose |
-|---|---|
-| `wgpu 0.19` | GPU abstraction (Vulkan/Metal/DX12/WebGPU) |
-| `winit 0.29` | Cross-platform windowing & input |
-| `bytemuck 1.14` | Safe byte casting for GPU uniform structs |
-| `glam 0.25` | SIMD-accelerated Vec3/Mat4/Quat math |
-| `image 0.24` | PNG/JPEG texture loading |
-| `log / env_logger` | Structured logging |
-| `pollster` | Blocking executor for wgpu's async init |
+## Screenshot
+![image](screenshot.png)

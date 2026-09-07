@@ -12,7 +12,7 @@ use winit::{
 };
 
 use renderer::Engine;
-use scene::{Scene, Light, LightKind, MeshBuilder};
+use scene::{Scene, Light, LightKind, mesh_builder::MeshBuilder};
 use glam::{Quat, Vec3, vec3};
 
 fn main() {
