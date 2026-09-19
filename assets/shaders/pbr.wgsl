@@ -12,27 +12,16 @@ struct CameraUniform {
     _pad      : f32,
 }
 
-struct ObjectUniform {
-    model          : mat4x4f,
-    normal_matrix0 : vec4f,
-    normal_matrix1 : vec4f,
-    normal_matrix2 : vec4f,
-    base_color     : vec3f,
-    metallic       : f32,
-    roughness      : f32,
-    _pad0          : f32,
-    _pad1          : f32,
-    _pad2          : f32,
-    emissive       : vec3f,
-    _pad3          : f32,
-}
-
 // group 0
 @group(0) @binding(0) var<uniform> camera : CameraUniform;
 @group(0) @binding(1) var<uniform> lights : LightsBlock;
 
 // group 1
-@group(1) @binding(0) var<uniform> object : ObjectUniform;
+@group(1) @binding(0) var sample          : sampler;
+@group(1) @binding(1) var base_colour_tex : texture_2d<f32>;
+// AO, Roughness, Metallic Map
+@group(1) @binding(2) var orm_tex         : texture_2d<f32>;
+@group(1) @binding(3) var normal_tex      : texture_2d<f32>;
 
 // ─── Vertex I/O ──────────────────────────────────────────────────────────────
 
@@ -44,34 +33,55 @@ struct VertexIn {
 }
 
 struct VertexOut {
-    @builtin(position) clip_pos  : vec4f,
-    @location(0)       world_pos : vec3f,
-    @location(1)       world_nor : vec3f,
-    @location(2)       uv        : vec2f,
-    @location(3)       tangent   : vec3f,
-    @location(4)       bitangent : vec3f,
+    @builtin(position) clip_pos    : vec4f,
+    @location(0)       world_pos   : vec3f,
+    @location(1)       uv          : vec2f,
+    @location(2)       world_nor   : vec3f,
+    @location(3)       world_tan   : vec4f,
+    @location(4)       base_colour : vec4f,
+    // @location(6)       metallic    : f32,
+    // @location(7)       roughness   : f32,
+    // @location(8)       emissive    : vec3f,
+}
+
+
+struct InstanceIn {
+	@location(4)  transform0    : vec4f,
+	@location(5)  transform1    : vec4f,
+	@location(6)  transform2    : vec4f,
+	@location(7)  transform3    : vec4f,
+	@location(8)  normal_matrix0 : vec3f,
+	@location(9) normal_matrix1 : vec3f,
+	@location(10) normal_matrix2 : vec3f,
+    @location(11) base_colour    : vec3f,
+    // @location(5) metallic       : f32,
+    // @location(6) roughness      : f32,
+    // @location(7) emissive       : vec3f,
 }
 
 // ─── Vertex Shader ───────────────────────────────────────────────────────────
 
 @vertex
-fn vs_main(v: VertexIn) -> VertexOut {
-    let normal_matrix = mat3x3(object.normal_matrix0.xyz, object.normal_matrix1.xyz, object.normal_matrix2.xyz);
+fn vs_main(v: VertexIn, i: InstanceIn) -> VertexOut {
+    let model = mat4x4(i.transform0, i.transform1, i.transform2, i.transform3);
+    let normal_matrix = mat3x3(i.normal_matrix0.xyz, i.normal_matrix1.xyz, i.normal_matrix2.xyz);
 
-    let world_pos = object.model * vec4f(v.position, 1.0);
+    let world_pos = model * vec4f(v.position, 1.0);
 
     // Transform normal & tangent using the normal matrix (ignores non-uniform scale)
-    let world_nor = normalize((normal_matrix * v.normal).xyz);
-    let world_tan = normalize((normal_matrix * v.tangent.xyz).xyz);
-    let world_bit = cross(world_nor, world_tan) * v.tangent.w;
+    let world_nor = (normal_matrix * v.normal).xyz;
+    let world_tan = normal_matrix * v.tangent.xyz;
 
     var out: VertexOut;
-    out.clip_pos  = camera.view_proj * world_pos;
-    out.world_pos = world_pos.xyz;
-    out.world_nor = world_nor;
-    out.uv        = v.uv;
-    out.tangent   = world_tan;
-    out.bitangent = world_bit;
+    out.clip_pos    = camera.view_proj * world_pos;
+    out.world_pos   = world_pos.xyz;
+    out.world_nor   = world_nor;
+    out.uv          = v.uv;
+    out.world_tan     = vec4(world_tan, v.tangent.w);
+    out.base_colour = vec4(i.base_colour, 1.0);
+    // out.metallic    = i.metallic;
+    // out.roughness   = i.roughness;
+    // out.emissive    = i.emissive;
     return out;
 }
 
@@ -92,12 +102,13 @@ struct LightUniform {
     _pad      : vec2f,
 }
 
+const LIGHTS_CAPACITY: u32 = 1;
 struct LightsBlock {
     count  : u32,
     _pad0  : u32,
     _pad1  : u32,
     _pad2  : u32,
-    lights : array<LightUniform, 8>,
+    lights : array<LightUniform, LIGHTS_CAPACITY>,
 }
 
 // ─── PBR Math ────────────────────────────────────────────────────────────────
@@ -180,18 +191,26 @@ fn attenuation(distance: f32, range: f32) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4f {
-    let N          = normalize(in.world_nor);
+    let normal = normalize(in.world_nor);
+    var tangent = normalize(in.world_tan.xyz);
+    let bitangent = cross(normal, tangent) * in.world_tan.w;
+    let TBN = mat3x3(tangent, bitangent, normal);
+
+    let N          = normalize(TBN * textureSample(normal_tex, sample, in.uv).xyz);
     let V          = normalize(camera.eye_pos - in.world_pos);
-    let base_color = object.base_color;
-    let metallic   = object.metallic;
-    let roughness  = clamp(object.roughness, 0.05, 1.0);
+    let base_colour = in.base_colour.xyz * textureSample(base_colour_tex, sample, in.uv).xyz;
+    let orm        = textureSample(orm_tex, sample, in.uv);
+    let ao         = orm.r;
+    let roughness  = clamp(orm.g, 0.05, 1.0);
+    let metallic   = orm.b;
+    let emissive   = vec3(0.0);
 
     // Ambient (IBL placeholder: simple hemisphere)
     let ambient_intensity = 0.04;
-    let up_factor  = max(dot(N, vec3f(0.0, 1.0, 0.0)), 0.0);
-    let sky_color  = vec3f(0.3, 0.5, 0.9) * up_factor;
-    let grnd_color = vec3f(0.15, 0.12, 0.1) * (1.0 - up_factor);
-    let ambient    = (sky_color + grnd_color) * ambient_intensity * base_color;
+    let up_factor    = max(dot(N, vec3f(0.0, 1.0, 0.0)), 0.0);
+    let sky_color    = vec3f(0.3, 0.5, 0.9) * up_factor;
+    let ground_color = vec3f(0.15, 0.12, 0.1) * (1.0 - up_factor);
+    let ambient      = ao * (sky_color + ground_color) * ambient_intensity * base_colour;
 
     var Lo = vec3f(0.0);
 
@@ -225,10 +244,10 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
             radiance  = light.color * light.intensity * atten;
         }
 
-        Lo += brdf(N, V, L, base_color, metallic, roughness) * radiance;
+        Lo += brdf(N, V, L, base_colour, metallic, roughness) * radiance;
     }
 
-    var color = ambient + Lo + object.emissive;
+    var color = ambient + Lo + emissive;
 
     return vec4f(color, 1.0);
 }

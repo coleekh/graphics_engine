@@ -91,8 +91,8 @@ impl SceneObject {
         .mul_diagonal_scale(self.scale.extend(1.0))
     }
 
-    pub fn normal_matrix(&self) -> Mat3A {
-        Mat3A::from_quat(self.rotation).mul_diagonal_scale(self.scale.recip())
+    pub fn normal_matrix(&self) -> Mat3 {
+        Mat3::from_quat(self.rotation).mul_diagonal_scale(self.scale.recip())
     }
 } 
 

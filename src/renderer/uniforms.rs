@@ -1,8 +1,6 @@
 use bytemuck::Zeroable;
-use glam::{Mat3A, Mat4, Vec3};
+use glam::{Mat3, Mat3A, Mat4, Vec2, Vec3};
 use crate::scene::{camera::Camera, SceneObject, Light, LightKind};
-
-pub const MAX_LIGHTS: usize = 8;
 
 // ─── Camera Uniform ───────────────────────────────────────────────────────────
 
@@ -42,11 +40,11 @@ pub struct LightUniform {
 }
 
 impl LightUniform {
-    pub fn from_scene_lights(lights: &[Light]) -> ([LightUniform; MAX_LIGHTS], usize) {
-        let mut arr = [LightUniform::zeroed(); MAX_LIGHTS];
-        let count   = lights.len().min(MAX_LIGHTS);
+    pub fn from_scene_lights(lights: &[Light]) -> ([LightUniform; crate::Engine::MAX_LIGHTS], usize) {
+        let mut arr = [LightUniform::zeroed(); crate::Engine::MAX_LIGHTS];
+        let count   = lights.len().min(crate::Engine::MAX_LIGHTS);
 
-        for (i, light) in lights.iter().take(MAX_LIGHTS).enumerate() {
+        for (i, light) in lights.iter().take(crate::Engine::MAX_LIGHTS).enumerate() {
             let (kind_id, inner_cos, outer_cos) = match &light.kind {
                 LightKind::Directional          => (0u32, 0.0, 0.0),
                 LightKind::Point                => (1u32, 0.0, 0.0),
@@ -76,35 +74,48 @@ impl LightUniform {
 
 // ─── Object Uniform ───────────────────────────────────────────────────────────
 
+
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct ObjectUniform {
+pub struct InstanceData {
     model:          Mat4,
-    normal_matrix:  Mat3A,
+    normal_matrix:  Mat3,
     base_color:     Vec3,
-    metallic:       f32,
-    roughness:      f32,
-    _pad0:          Vec3,
-    emissive:       Vec3,
-    _pad1:          f32,
+    // metallic:       f32,
+    // roughness:      f32,
+    // _pad0:          Vec3,
+    // emissive:       Vec3,
+    // _pad1:          f32,
 }
 
-impl ObjectUniform {
+impl InstanceData {
     pub fn from_object(obj: &SceneObject) -> Self {
         let model = obj.model();
-
-        // Normal matrix: transpose of the inverse of the upper-left 3×3
         let normal_matrix = obj.normal_matrix();
 
         Self {
             model,
             normal_matrix,
             base_color:    obj.material.base_color,
-            metallic:      obj.material.metallic,
-            roughness:     obj.material.roughness,
-            _pad0:         Vec3::ZERO,
-            emissive:      obj.material.emissive,
-            _pad1:         0.0,
+            // metallic:      obj.material.metallic,
+            // roughness:     obj.material.roughness,
+            // _pad0:         Vec3::ZERO,
+            // emissive:      obj.material.emissive,
+            // _pad1:         0.0,
+        }
+    }
+
+    pub fn layout() -> wgpu::VertexBufferLayout<'static> {
+        const ATTRIBUTES: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
+            4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4, // model matrix 
+            8 => Float32x3, 9 => Float32x3, 10 => Float32x3, // normal matrix
+            11 => Float32x3, // base_colour
+        ];
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<InstanceData>() as wgpu::BufferAddress,
+            step_mode:    wgpu::VertexStepMode::Instance,
+            attributes:   &ATTRIBUTES,
         }
     }
 }

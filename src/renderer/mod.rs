@@ -1,16 +1,18 @@
 mod gpu;
 mod pipeline;
 mod mesh_store;
+mod texture_store;
 mod uniforms;
 
 pub use gpu::GpuContext;
 pub use mesh_store::MeshStore;
+pub use texture_store::TextureStore;
 
 use winit::window::Window;
 use wgpu::util::DeviceExt;
 
-use crate::scene::{Scene, Mesh, MeshHandle};
-use uniforms::{CameraUniform, LightUniform, ObjectUniform, MAX_LIGHTS};
+use crate::{renderer::texture_store::SamplerStore, scene::{Mesh, MeshHandle, Scene}};
+use uniforms::{CameraUniform, LightUniform, InstanceData};
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
 
@@ -18,6 +20,8 @@ use uniforms::{CameraUniform, LightUniform, ObjectUniform, MAX_LIGHTS};
 pub struct Engine<'a> {
     pub gpu:        GpuContext<'a>,
     pub mesh_store: MeshStore,
+    texture_store:  TextureStore,
+    sampler_store:  SamplerStore,
 
     // Render pipeline
     pbr_pipeline:   wgpu::RenderPipeline,
@@ -25,7 +29,7 @@ pub struct Engine<'a> {
     // Bind group layout for camera + lights (set 0)
     frame_bgl:      wgpu::BindGroupLayout,
     // Bind group layout for per-object data (set 1)
-    object_bgl:     wgpu::BindGroupLayout,
+    material_bgl:   wgpu::BindGroupLayout,
 
     // Per-frame GPU uniform buffers
     camera_buf:     wgpu::Buffer,
@@ -35,9 +39,12 @@ pub struct Engine<'a> {
     // Depth texture
     depth_texture:  wgpu::Texture,
     depth_view:     wgpu::TextureView,
+
 }
 
 impl<'a> Engine<'a> {
+    pub const MAX_LIGHTS: usize = 8;
+
     pub async fn new(window: std::sync::Arc<Window>) -> Self {
         let gpu = GpuContext::new(window).await;
 
@@ -71,16 +78,46 @@ impl<'a> Engine<'a> {
             ],
         });
 
-        let object_bgl = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("object_bgl"),
+        let material_bgl = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("material_bgl"),
             entries: &[
+                // sampler
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // base_colour texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture { 
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true }, 
+                        view_dimension: wgpu::TextureViewDimension::D2, 
+                        multisampled: false 
+                    },
+                    count: None,
+                },
+                // orm texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture { 
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true }, 
+                        view_dimension: wgpu::TextureViewDimension::D2, 
+                        multisampled: false 
+                    },
+                    count: None,
+                },
+                // normal texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture { 
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true }, 
+                        view_dimension: wgpu::TextureViewDimension::D2, 
+                        multisampled: false 
                     },
                     count: None,
                 },
@@ -96,7 +133,7 @@ impl<'a> Engine<'a> {
             mapped_at_creation: false,
         });
 
-        let lights_size = std::mem::size_of::<LightUniform>() * MAX_LIGHTS + 16; // +count padding
+        let lights_size = std::mem::size_of::<LightUniform>() * Self::MAX_LIGHTS + 16; // + count + padding
         let lights_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("lights_uniform"),
             size:  lights_size as u64,
@@ -128,20 +165,28 @@ impl<'a> Engine<'a> {
         );
 
         // ── Pipeline ──────────────────────────────────────────────────────
-
+        
         let pbr_pipeline = pipeline::create_pbr_pipeline(
             &gpu.device,
             gpu.surface_config.format,
             &frame_bgl,
-            &object_bgl,
+            &material_bgl,
+            Self::MAX_LIGHTS as u32,
         );
-
+        
+        // ── Asset Stores ──────────────────────────────────────────────────────
+        let sampler_store = SamplerStore::new(&gpu);
+        let texture_store = TextureStore::new(&gpu);
+        let mesh_store = MeshStore::new();
+        
         Engine {
-            mesh_store: MeshStore::new(),
             gpu,
+            mesh_store,
+            texture_store,
+            sampler_store,
             pbr_pipeline,
             frame_bgl,
-            object_bgl,
+            material_bgl,
             camera_buf,
             lights_buf,
             frame_bg,
@@ -179,7 +224,7 @@ impl<'a> Engine<'a> {
 
         // ── Upload lights uniform ─────────────────────────────────────────
         let (lights_data, count) = LightUniform::from_scene_lights(&scene.lights);
-        let count = count.min(MAX_LIGHTS as usize) as u32; // clamp to max;
+        let count = count.min(Self::MAX_LIGHTS as usize) as u32; // clamp to max;
         let count_bytes = bytemuck::bytes_of(&count);
         // write count first (aligned)
         self.gpu.queue.write_buffer(&self.lights_buf, 0, count_bytes);
@@ -193,22 +238,40 @@ impl<'a> Engine<'a> {
         );
 
         let objects: Vec<_> = scene.objects.iter().map(|obj| {
-            // Create per-object uniform + bind group
-            let obj_uni = ObjectUniform::from_object(obj);
-            let obj_buf = self.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label:    Some("object_uniform"),
-                contents: bytemuck::bytes_of(&obj_uni),
-                usage:    wgpu::BufferUsages::UNIFORM,
+            // Create instance buffer + bind group
+            let instance = InstanceData::from_object(obj);
+            let instance_buf = self.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label:    Some("instance_buffer"),
+                contents: bytemuck::bytes_of(&instance),
+                usage:    wgpu::BufferUsages::VERTEX,
             });
             let obj_bg = self.gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label:  Some("object_bg"),
-                layout: &self.object_bgl,
-                entries: &[wgpu::BindGroupEntry {
-                    binding:  0,
-                    resource: obj_buf.as_entire_binding(),
-                }],
+                layout: &self.material_bgl,
+                entries: &[
+                    // sampler 
+                    wgpu::BindGroupEntry {
+                        binding:  0,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler_store.linear_wrap),
+                    }, 
+                    // base_colour_tex 
+                    wgpu::BindGroupEntry {
+                        binding:  1,
+                        resource: wgpu::BindingResource::TextureView(&self.texture_store.white_view),
+                    },
+                    // orm_tex 
+                    wgpu::BindGroupEntry {
+                        binding:  2,
+                        resource: wgpu::BindingResource::TextureView(&self.texture_store.black_view),
+                    },
+                    // normal_tex 
+                    wgpu::BindGroupEntry {
+                        binding:  3,
+                        resource: wgpu::BindingResource::TextureView(&self.texture_store.unit_normal_view),
+                    }
+                ],
             });
-            (obj_bg, obj.mesh)
+            (obj_bg, obj.mesh, instance_buf)
         }).collect();
 
 
@@ -240,11 +303,12 @@ impl<'a> Engine<'a> {
             rpass.set_pipeline(&self.pbr_pipeline);
             rpass.set_bind_group(0, &self.frame_bg, &[]);
 
-            for (obj_bg, obj_mesh) in objects.iter() {
+            for (obj_bg, obj_mesh, instance_buf) in objects.iter() {
                 rpass.set_bind_group(1, obj_bg, &[]);
 
                 if let Some(gpu_mesh) = self.mesh_store.get(*obj_mesh) {
                     rpass.set_vertex_buffer(0, gpu_mesh.vertex_buf.slice(..));
+                    rpass.set_vertex_buffer(1, instance_buf.slice(..));
                     rpass.set_index_buffer(gpu_mesh.index_buf.slice(..), wgpu::IndexFormat::Uint32);
                     rpass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);
                 }

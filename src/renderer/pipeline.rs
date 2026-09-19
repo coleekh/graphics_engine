@@ -1,11 +1,12 @@
-use crate::scene::Vertex;
+use crate::{renderer::uniforms::InstanceData, scene::Vertex};
 
 /// Build the PBR render pipeline from the embedded WGSL shader.
 pub fn create_pbr_pipeline(
     device:     &wgpu::Device,
     format:      wgpu::TextureFormat,
     frame_bgl:  &wgpu::BindGroupLayout,
-    object_bgl: &wgpu::BindGroupLayout,
+    material_bgl: &wgpu::BindGroupLayout,
+    lights_capacity: u32,
 ) -> wgpu::RenderPipeline {
     // Embed shader at compile time so the binary is self-contained.
     let shader_src = include_str!("../../assets/shaders/pbr.wgsl");
@@ -16,7 +17,7 @@ pub fn create_pbr_pipeline(
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label:                Some("pbr_layout"),
-        bind_group_layouts:   &[frame_bgl, object_bgl],
+        bind_group_layouts:   &[frame_bgl, material_bgl],
         push_constant_ranges: &[],
     });
 
@@ -27,7 +28,7 @@ pub fn create_pbr_pipeline(
         vertex: wgpu::VertexState {
             module:      &shader,
             entry_point: "vs_main",
-            buffers:     &[Vertex::layout()],
+            buffers:     &[Vertex::layout(), InstanceData::layout()],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         },
 
@@ -39,7 +40,12 @@ pub fn create_pbr_pipeline(
                 blend: Some(wgpu::BlendState::REPLACE),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                zero_initialize_workgroup_memory: true,
+                constants: &std::collections::HashMap::from([
+                    ("LIGHTS_CAPACITY".into(), lights_capacity.into()),
+                ]),
+            },
         }),
 
         primitive: wgpu::PrimitiveState {
