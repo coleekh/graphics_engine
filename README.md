@@ -84,19 +84,15 @@ EventLoop → main.rs
 ---
 
 ## Extending the Engine
-
-### Add a texture to a material
-
-Use `utils::load_texture()` and extend `ObjectUniform` + the WGSL shader to sample it.
-
 ### Add a new render pass (e.g. shadow maps)
 
 1. Create a depth-only texture for each directional light.
 2. Add a `shadow_pipeline` (vertex-only, no fragment).
 3. Render all objects into the shadow map before the main pass.
-4. Sample the shadow map in `pbr.wgsl` using `textureSampleCompare`.
+4. Sample the shadow map in `opaque_lit.wgsl` using `textureSampleCompare`.
 
 ---
 
 ## Screenshot
 ![image](screenshot.png)
+![image](screenshot2.png)
