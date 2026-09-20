@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-//  pbr.wgsl  –  Physically-Based Rendering (Cook-Torrance GGX)
+//  opaque_lit.wgsl  –  Physically-Based Rendering (Cook-Torrance GGX)
 //  Supports: directional lights, point lights, spot lights
 //  Model: metallic-roughness workflow
 // ═══════════════════════════════════════════════════════════════════════════
@@ -38,25 +38,24 @@ struct VertexOut {
     @location(1)       uv          : vec2f,
     @location(2)       world_nor   : vec3f,
     @location(3)       world_tan   : vec4f,
-    @location(4)       base_colour : vec4f,
-    // @location(6)       metallic    : f32,
-    // @location(7)       roughness   : f32,
-    // @location(8)       emissive    : vec3f,
+    @location(4)       base_colour_tint : vec4f,
+    @location(6)       orm_factor       : vec3f,
+    @location(7)       emissive         : vec3f,
 }
 
 
 struct InstanceIn {
-	@location(4)  transform0    : vec4f,
-	@location(5)  transform1    : vec4f,
-	@location(6)  transform2    : vec4f,
-	@location(7)  transform3    : vec4f,
-	@location(8)  normal_matrix0 : vec3f,
-	@location(9) normal_matrix1 : vec3f,
-	@location(10) normal_matrix2 : vec3f,
-    @location(11) base_colour    : vec3f,
-    // @location(5) metallic       : f32,
-    // @location(6) roughness      : f32,
-    // @location(7) emissive       : vec3f,
+	@location(4)  transform0       : vec4f,
+	@location(5)  transform1       : vec4f,
+	@location(6)  transform2       : vec4f,
+	@location(7)  transform3       : vec4f,
+	@location(8)  normal_matrix0   : vec3f,
+	@location(9)  normal_matrix1   : vec3f,
+	@location(10) normal_matrix2   : vec3f,
+    @location(11) base_colour_tint : vec3f,
+    @location(12) orm_factor       : vec3f,
+    @location(13) emissive         : vec3f,
+    @location(14) uv_scale         : vec2f,
 }
 
 // ─── Vertex Shader ───────────────────────────────────────────────────────────
@@ -76,12 +75,11 @@ fn vs_main(v: VertexIn, i: InstanceIn) -> VertexOut {
     out.clip_pos    = camera.view_proj * world_pos;
     out.world_pos   = world_pos.xyz;
     out.world_nor   = world_nor;
-    out.uv          = v.uv;
-    out.world_tan     = vec4(world_tan, v.tangent.w);
-    out.base_colour = vec4(i.base_colour, 1.0);
-    // out.metallic    = i.metallic;
-    // out.roughness   = i.roughness;
-    // out.emissive    = i.emissive;
+    out.uv          = v.uv * i.uv_scale;
+    out.world_tan   = vec4(world_tan, v.tangent.w);
+    out.base_colour_tint = vec4(i.base_colour_tint, 1.0);
+    out.orm_factor  = i.orm_factor;
+    out.emissive    = i.emissive;
     return out;
 }
 
@@ -195,22 +193,21 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     var tangent = normalize(in.world_tan.xyz);
     let bitangent = cross(normal, tangent) * in.world_tan.w;
     let TBN = mat3x3(tangent, bitangent, normal);
+    let N           = normalize(TBN * textureSample(normal_tex, sample, in.uv).xyz);
+    let V           = normalize(camera.eye_pos - in.world_pos);
 
-    let N          = normalize(TBN * textureSample(normal_tex, sample, in.uv).xyz);
-    let V          = normalize(camera.eye_pos - in.world_pos);
-    let base_colour = in.base_colour.xyz * textureSample(base_colour_tex, sample, in.uv).xyz;
-    let orm        = textureSample(orm_tex, sample, in.uv);
-    let ao         = orm.r;
-    let roughness  = clamp(orm.g, 0.05, 1.0);
-    let metallic   = orm.b;
-    let emissive   = vec3(0.0);
+    let base_colour = in.base_colour_tint.rgb * textureSample(base_colour_tex, sample, in.uv).rgb;
+    let orm         = in.orm_factor * textureSample(orm_tex, sample, in.uv).rgb;
+    let ao          = orm.r;
+    let roughness   = clamp(orm.g, 0.05, 1.0);
+    let metallic    = orm.b;
+    let emissive    = in.emissive;
 
     // Ambient (IBL placeholder: simple hemisphere)
-    let ambient_intensity = 0.04;
     let up_factor    = max(dot(N, vec3f(0.0, 1.0, 0.0)), 0.0);
     let sky_color    = vec3f(0.3, 0.5, 0.9) * up_factor;
     let ground_color = vec3f(0.15, 0.12, 0.1) * (1.0 - up_factor);
-    let ambient      = ao * (sky_color + ground_color) * ambient_intensity * base_colour;
+    let ambient      = ao * (sky_color + ground_color) * base_colour;
 
     var Lo = vec3f(0.0);
 

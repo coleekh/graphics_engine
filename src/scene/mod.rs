@@ -70,7 +70,7 @@ use glam::{Vec2, Vec4};
 
 #[derive(Clone, Debug)]
 pub struct Material {
-    pub base_color: Vec3,
+    pub base_colour: Vec3,
     pub metallic:   f32,
     pub roughness:  f32,
     pub emissive:   Vec3,

@@ -204,7 +204,7 @@ fn build_demo_scene(engine: &mut Engine) -> Scene {
         rotation: Quat::IDENTITY,
         scale: Vec3::ONE,
         material: scene::Material {
-            base_color: Vec3::new(0.3, 0.32, 0.35),
+            base_colour: Vec3::new(0.3, 0.32, 0.35),
             metallic: 0.0,
             roughness: 0.9,
             emissive: Vec3::ZERO,
@@ -220,7 +220,7 @@ fn build_demo_scene(engine: &mut Engine) -> Scene {
         rotation: Quat::from_axis_angle(vec3(0.0, 1.0, 0.0), std::f32::consts::FRAC_PI_3),
         scale: Vec3::ONE,
         material: scene::Material {
-            base_color: Vec3::new(0.8, 0.2, 0.2),
+            base_colour: Vec3::new(0.8, 0.2, 0.2).normalize(),
             metallic: 0.1,
             roughness: 0.4,
             emissive: Vec3::ZERO,
@@ -236,7 +236,7 @@ fn build_demo_scene(engine: &mut Engine) -> Scene {
         rotation: Quat::IDENTITY,
         scale: Vec3::ONE,
         material: scene::Material {
-            base_color: Vec3::new(0.2, 0.5, 0.9),
+            base_colour: Vec3::new(0.2, 0.5, 0.9).normalize(),
             metallic: 0.8,
             roughness: 0.2,
             emissive: Vec3::ZERO,
@@ -252,7 +252,7 @@ fn build_demo_scene(engine: &mut Engine) -> Scene {
         rotation: Quat::IDENTITY,
         scale: Vec3::ONE,
         material: scene::Material {
-            base_color: Vec3::new(0.9, 0.7, 0.1),
+            base_colour: Vec3::new(0.9, 0.7, 0.1).normalize(),
             metallic: 0.6,
             roughness: 0.3,
             emissive: Vec3::ZERO,
@@ -268,7 +268,7 @@ fn build_demo_scene(engine: &mut Engine) -> Scene {
         rotation: Quat::IDENTITY,
         scale: Vec3::ONE,
         material: scene::Material {
-            base_color: Vec3::ZERO,
+            base_colour: Vec3::ZERO,
             metallic: 0.0,
             roughness: 1.0,
             emissive: Vec3::new(0.3, 0.6, 1.0) * 3.0,
@@ -304,23 +304,22 @@ impl Scene {
         self.camera.translate(clock.delta_time() as f32 * vec3(strafe, fly, run) * speed);
 
         // Rotate cube (index 1)
-        // if let Some(obj) = self.objects.get_mut(1) {
-        //     obj.rotation = Quat::from_rotation_y(clock.total_time() as f32 * 0.8)
-        //     // obj.rotation = Quat::from_rotation_y(clock.total_time() as f32 * 0.8)
-        //     //     * Quat::from_rotation_x(clock.total_time() as f32 * 0.3);
-        // }
+        if let Some(obj) = self.objects.get_mut(1) {
+            obj.rotation = Quat::from_rotation_y(clock.total_time() as f32 * 0.8)
+                * Quat::from_rotation_x(clock.total_time() as f32 * 0.3);
+        }
 
-        // // Bob sphere (index 2)
-        // if let Some(obj) = self.objects.get_mut(2) {
-        //     obj.position.y = 0.5 + (clock.total_time() as f32 * 1.2).sin() * 0.4;
-        //     obj.rotation = Quat::from_rotation_y(clock.total_time() as f32 * -0.5);
-        // }
+        // Bob sphere (index 2)
+        if let Some(obj) = self.objects.get_mut(2) {
+            obj.position.y = 0.5 + (clock.total_time() as f32 * 1.2).sin() * 0.4;
+            obj.rotation = Quat::from_rotation_y(clock.total_time() as f32 * -0.5);
+        }
 
-        // // Spin torus (index 3)
-        // if let Some(obj) = self.objects.get_mut(3) {
-        //     obj.rotation = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)
-        //         * Quat::from_rotation_z(clock.total_time() as f32 * 1.1);
-        // }
+        // Spin torus (index 3)
+        if let Some(obj) = self.objects.get_mut(3) {
+            obj.rotation = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)
+                * Quat::from_rotation_z(clock.total_time() as f32 * 1.1);
+        }
 
         // Orbit the point light and its orb proxy (index 4)
         let orbit_r = 3.0f32;

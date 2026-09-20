@@ -1,5 +1,5 @@
 use bytemuck::Zeroable;
-use glam::{Mat3, Mat3A, Mat4, Vec2, Vec3};
+use glam::{Mat3, Mat3A, Mat4, Vec2, Vec3, vec2, vec3};
 use crate::scene::{camera::Camera, SceneObject, Light, LightKind};
 
 // ─── Camera Uniform ───────────────────────────────────────────────────────────
@@ -79,14 +79,12 @@ impl LightUniform {
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct InstanceData {
-    model:          Mat4,
-    normal_matrix:  Mat3,
-    base_color:     Vec3,
-    // metallic:       f32,
-    // roughness:      f32,
-    // _pad0:          Vec3,
-    // emissive:       Vec3,
-    // _pad1:          f32,
+    model:            Mat4,
+    normal_matrix:    Mat3,
+    base_colour_tint: Vec3,
+    orm_factor:       Vec3,
+    emissive:         Vec3,
+    uv_scale:             Vec2,
 }
 
 impl InstanceData {
@@ -97,12 +95,10 @@ impl InstanceData {
         Self {
             model,
             normal_matrix,
-            base_color:    obj.material.base_color,
-            // metallic:      obj.material.metallic,
-            // roughness:     obj.material.roughness,
-            // _pad0:         Vec3::ZERO,
-            // emissive:      obj.material.emissive,
-            // _pad1:         0.0,
+            base_colour_tint: obj.material.base_colour,
+            orm_factor:       vec3(0.04, obj.material.roughness, obj.material.metallic),
+            emissive:         obj.material.emissive,
+            uv_scale:         vec2(10.0, 10.0),
         }
     }
 
@@ -110,7 +106,10 @@ impl InstanceData {
         const ATTRIBUTES: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
             4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4, // model matrix 
             8 => Float32x3, 9 => Float32x3, 10 => Float32x3, // normal matrix
-            11 => Float32x3, // base_colour
+            11 => Float32x3, // base_colour_tint
+            12 => Float32x3, // orm_factor
+            13 => Float32x3, // emissive
+            14 => Float32x2, // _pad
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<InstanceData>() as wgpu::BufferAddress,

@@ -9,7 +9,7 @@ pub fn create_pbr_pipeline(
     lights_capacity: u32,
 ) -> wgpu::RenderPipeline {
     // Embed shader at compile time so the binary is self-contained.
-    let shader_src = include_str!("../../assets/shaders/pbr.wgsl");
+    let shader_src = include_str!("../../assets/shaders/opaque_lit.wgsl");
     let shader     = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label:  Some("pbr_shader"),
         source: wgpu::ShaderSource::Wgsl(shader_src.into()),

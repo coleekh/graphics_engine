@@ -252,17 +252,17 @@ impl<'a> Engine<'a> {
                     // sampler 
                     wgpu::BindGroupEntry {
                         binding:  0,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler_store.linear_wrap),
+                        resource: wgpu::BindingResource::Sampler(&self.sampler_store.nearest_wrap),
                     }, 
                     // base_colour_tex 
                     wgpu::BindGroupEntry {
                         binding:  1,
-                        resource: wgpu::BindingResource::TextureView(&self.texture_store.white_view),
+                        resource: wgpu::BindingResource::TextureView(&self.texture_store.checkered_view),
                     },
                     // orm_tex 
                     wgpu::BindGroupEntry {
                         binding:  2,
-                        resource: wgpu::BindingResource::TextureView(&self.texture_store.black_view),
+                        resource: wgpu::BindingResource::TextureView(&self.texture_store.white_view),
                     },
                     // normal_tex 
                     wgpu::BindGroupEntry {
