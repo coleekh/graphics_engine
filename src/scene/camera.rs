@@ -23,7 +23,6 @@ impl Default for Camera {
             position: Vec3::ZERO,
             up: DEFAULT_WORLD_UP,
             scale: Vec3::ONE,
-            // fov_y: Radian::EIGTH_TURN, // aproximate human fov
             fov_y: std::f32::consts::FRAC_PI_4, // aproximate human fov
             z_near: 0.1,
             z_far: 500.0,
@@ -202,6 +201,7 @@ impl Camera {
             && point_camera.z < self.z_far
     }
 
+    // this implementation only checks corners (misses some edge cases)
     // pub fn is_aabb_in_view(&self, aabb: &AABB3D<f32>) -> bool {
     //     let points = aabb.points();
     //     self.is_point_in_view(&points[0])

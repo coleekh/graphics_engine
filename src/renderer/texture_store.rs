@@ -41,6 +41,7 @@ pub struct TextureStore {
 
         let white_colour = [255, 255, 255, 255];
         let black_colour = [0, 0, 0, 255];
+        let grey_colour = [126, 126, 126, 255];
 
         let white = pixel_texture(gpu, &white_colour, wgpu::TextureFormat::Rgba8Unorm);
         let black = pixel_texture(gpu, &[0, 0, 0, 255], wgpu::TextureFormat::Rgba8Unorm);
@@ -63,7 +64,7 @@ pub struct TextureStore {
             sample_count: 1,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
-            }, wgpu::util::TextureDataOrder::default(), &bytemuck::bytes_of(&[white_colour, black_colour, white_colour, black_colour]));
+            }, wgpu::util::TextureDataOrder::default(), &bytemuck::bytes_of(&[white_colour, grey_colour, white_colour, grey_colour]));
         let checkered_view = checkered.create_view(&wgpu::TextureViewDescriptor::default());
 
         Self { white, black, unit_normal, white_view, black_view, unit_normal_view, checkered, checkered_view }
