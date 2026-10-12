@@ -1,8 +1,7 @@
-// ═══════════════════════════════════════════════════════════════════════════
 //  opaque_lit.wgsl  –  Physically-Based Rendering (Cook-Torrance GGX)
 //  Supports: directional lights, point lights, spot lights
 //  Model: metallic-roughness workflow
-// ═══════════════════════════════════════════════════════════════════════════
+//  Shadows: at most one directional light is shadow-mapped, by a single 2D depth map
 
 // ─── Bind Groups ─────────────────────────────────────────────────────────────
 
@@ -15,6 +14,9 @@ struct CameraUniform {
 // group 0
 @group(0) @binding(0) var<uniform> camera : CameraUniform;
 @group(0) @binding(1) var<uniform> lights : LightsBlock;
+@group(0) @binding(2) var<uniform> shadow : ShadowUniform;
+@group(0) @binding(3) var shadow_map     : texture_depth_2d;
+@group(0) @binding(4) var shadow_sampler : sampler_comparison;
 
 // group 1
 @group(1) @binding(0) var sample          : sampler;
@@ -41,6 +43,7 @@ struct VertexOut {
     @location(4)       base_colour_tint : vec4f,
     @location(6)       orm_factor       : vec3f,
     @location(7)       emissive         : vec3f,
+    @location(8)       light_space_pos  : vec4f,
 }
 
 
@@ -73,6 +76,7 @@ fn vs_main(v: VertexIn, i: InstanceIn) -> VertexOut {
 
     var out: VertexOut;
     out.clip_pos    = camera.view_proj * world_pos;
+    out.light_space_pos = shadow.transform * world_pos;
     out.world_pos   = world_pos.xyz;
     out.world_nor   = world_nor;
     out.uv          = v.uv * i.uv_scale;
@@ -107,6 +111,18 @@ struct LightsBlock {
     _pad1  : u32,
     _pad2  : u32,
     lights : array<LightUniform, LIGHTS_CAPACITY>,
+}
+
+// Shadow map for one directional caster. `transform` is the same matrix the
+// depth pass (shadow_depth.wgsl) renders with, so both passes agree on depth.
+struct ShadowUniform {
+    transform   : mat4x4f,
+    light_index : u32,    // index into lights.lights of the caster; out of range = no shadows
+    _pad0       : u32,
+    depth_bias  : f32,    // constant bias, removes acne on light-facing surfaces
+    slope_bias  : f32,    // additional bias scaled by the surface's slope to the light
+    texel_size  : vec2f,  // 1.0 / shadow map resolution, used to spread the PCF taps
+    _pad1       : vec2f,
 }
 
 // ─── PBR Math ────────────────────────────────────────────────────────────────
@@ -187,6 +203,44 @@ fn attenuation(distance: f32, range: f32) -> f32 {
 }
 
 
+// Shadow map helpers
+
+// Slope-scaled depth bias. A surface edge-on to the light spans many shadow-map
+// texels per unit of depth, so it needs more bias than one facing the light,
+// otherwise acne shows up at grazing angles.
+fn shadow_bias(NdL: f32) -> f32 {
+    let cos_theta = clamp(NdL, 0.0, 1.0);
+    let tan_theta = sqrt(1.0 - cos_theta * cos_theta) / max(cos_theta, 0.0001);
+    return shadow.depth_bias + shadow.slope_bias * min(tan_theta, 4.0); // min(tan_theta, 4.0) -> min(theta, ~76°)
+}
+
+// Visibility lookup: 1.0 = fully lit, 0.0 = fully shadowed.
+// `light_pos` is the caster-space position interpolated from vs_main.
+fn sample_shadow(light_pos: vec4f, N: vec3f, L: vec3f) -> f32 {
+    let ndc = light_pos.xyz / light_pos.w;
+
+    // Texture v runs top-down while NDC y runs bottom-up, so flip y.
+    let uv = ndc.xy * vec2f(0.5, -0.5) + vec2f(0.5, 0.5);
+
+    // Outside the map nothing was rendered, so leave the fragment lit.
+    if any(uv < vec2f(0.0)) || any(uv > vec2f(1.0)) {
+        return 1.0;
+    }
+
+    // wgpu NDC z is already 0..1, so it compares against stored depth directly.
+    let reference = ndc.z - shadow_bias(dot(N, L));
+
+    var visibility = 0.0;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            let offset = vec2f(f32(x), f32(y)) * shadow.texel_size;
+            visibility += textureSampleCompareLevel(shadow_map, shadow_sampler, uv + offset, reference);
+        }
+    }
+    return visibility / 9.0;
+}
+
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let normal = normalize(in.world_nor);
@@ -217,12 +271,10 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
         var radiance : vec3f;
 
         if light.kind == DIRECTION_LIGHT {
-            // ── Directional ────────────────────────────────────────────
             L         = normalize(-light.direction);
             radiance  = light.color * light.intensity;
 
         } else if light.kind == POINT_LIGHT {
-            // ── Point ──────────────────────────────────────────────────
             let diff  = light.position - in.world_pos;
             L         = normalize(diff);
             let dist  = length(diff);
@@ -230,7 +282,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
             radiance  = light.color * light.intensity * atten;
 
         } else {
-            // ── Spot ───────────────────────────────────────────────────
             let diff  = light.position - in.world_pos;
             L         = normalize(diff);
             let dist  = length(diff);
@@ -239,6 +290,13 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
             let spot  = clamp((theta - light.outer_cos) / eps, 0.0, 1.0);
             let atten = attenuation(dist, light.range) * spot;
             radiance  = light.color * light.intensity * atten;
+        }
+
+        // Only the designated directional caster is shadowed; every other light,
+        // and every light when light_index is out of range, stays unshadowed.
+        // Scaling the whole radiance dims diffuse and specular alike.
+        if i == shadow.light_index {
+            radiance = radiance * sample_shadow(in.light_space_pos, N, L);
         }
 
         Lo += brdf(N, V, L, base_colour, metallic, roughness) * radiance;

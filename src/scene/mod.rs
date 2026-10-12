@@ -1,5 +1,8 @@
+pub mod aabb;
 pub mod camera;
 pub mod mesh_builder;
+
+pub use aabb::Aabb;
 
 use glam::{Mat3, Mat3A, Mat4, Quat, Vec3, vec2, vec3, vec4};
 
@@ -62,6 +65,16 @@ impl Vertex {
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices:  Vec<u32>,
+}
+
+impl Mesh {
+    /// Local-space bounds of the vertices, or `None` when the mesh is empty.
+    pub fn bounds(&self) -> Option<Aabb> {
+        if self.vertices.is_empty() {
+            return None;
+        }
+        Some(Aabb::from_points(self.vertices.iter().map(|vertex| vertex.position)))
+    }
 }
 
 // ─── MeshBuilder ─────────────────────────────────────────────────────────────

@@ -49,6 +49,18 @@ impl Camera {
         }
     }
 
+    pub fn forward(&self) -> Vec3 {
+        self.orientation.mul_vec3(-Vec3::Z)
+    }
+
+    pub fn right(&self) -> Vec3 {
+        self.orientation.mul_vec3(Vec3::X)
+    }
+
+    pub fn up(&self) -> Vec3 {
+        self.orientation.mul_vec3(Vec3::Y)
+    }
+
     // Returns (bottom left corner frustum ray, top right corner frustum ray)
     /// the other corners of the frustum can be calculated from the returned ray
     pub fn ray(&self) -> Vec3 {
