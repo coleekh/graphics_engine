@@ -6,6 +6,8 @@ pub struct GpuMesh {
     pub vertex_buf:  wgpu::Buffer,
     pub index_buf:   wgpu::Buffer,
     pub index_count: u32,
+    /// Local-space bounds, used to fit the shadow volume to the scene.
+    pub bounds:      Option<crate::scene::Aabb>,
 }
 
 /// Manages all uploaded meshes, indexed by MeshHandle.
@@ -37,6 +39,7 @@ impl MeshStore {
             vertex_buf,
             index_buf,
             index_count: mesh.indices.len() as u32,
+            bounds: mesh.bounds(),
         });
 
         log::debug!(
