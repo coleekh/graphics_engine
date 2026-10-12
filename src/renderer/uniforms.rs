@@ -74,8 +74,6 @@ impl LightUniform {
 
 // ─── Object Uniform ───────────────────────────────────────────────────────────
 
-
-
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct InstanceData {
@@ -84,7 +82,7 @@ pub struct InstanceData {
     base_colour_tint: Vec3,
     orm_factor:       Vec3,
     emissive:         Vec3,
-    uv_scale:             Vec2,
+    uv_scale:         Vec2,
 }
 
 impl InstanceData {
@@ -109,7 +107,7 @@ impl InstanceData {
             11 => Float32x3, // base_colour_tint
             12 => Float32x3, // orm_factor
             13 => Float32x3, // emissive
-            14 => Float32x2, // _pad
+            14 => Float32x2, // uv_scale
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<InstanceData>() as wgpu::BufferAddress,
